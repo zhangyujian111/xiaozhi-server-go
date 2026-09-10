@@ -1,0 +1,49 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+xiaozhi-server-go
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# Output of go coverage
+*.out
+coverage.html
+coverage.txt
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (contains secrets)
+configs/config.yaml
+configs/device.key.enc
+
+# Logs
+logs/
+*.log
+
+# Build
+build/
+dist/
+
+# Temporary
+tmp/
+temp/

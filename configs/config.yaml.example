@@ -1,0 +1,142 @@
+# =============================================================================
+# xiaozhi-server-go 配置文件
+# =============================================================================
+# 环境: dev / staging / production
+# 用法: 复制此文件为 config.yaml 并修改相应配置
+#   cp configs/config.yaml.example configs/config.yaml
+# =============================================================================
+
+# --- HTTP 服务配置 ---
+server:
+  host: "0.0.0.0"
+  port: 8080
+  addr: "0.0.0.0:8080"
+  read_timeout: 30s
+  write_timeout: 30s
+  max_header_bytes: 1048576  # 1MB
+
+# --- WebSocket 配置 ---
+websocket:
+  read_buffer_size: 4096
+  write_buffer_size: 4096
+  max_message_size: 65536      # 64KB，单帧最大
+  ping_interval: 30s           # 服务端 ping 间隔
+  pong_wait: 60s               # 等待 pong 超时
+  write_wait: 10s              # 写超时
+  max_connections: 1000        # 最大连接数
+  handshake_timeout: 10s       # 握手超时
+
+# --- ykt-aisaas 后端服务配置 ---
+aisaas:
+  url: "http://localhost:8190"           # aisaas 服务地址
+  base_url: "http://localhost:8190"      # 同上（兼容）
+  internal_token: "your-internal-token"  # X-Internal-Token（内部接口鉴权）
+  timeout: 30s                           # 请求超时
+  max_retries: 3                         # 最大重试次数
+  retry_backoff: 1s                      # 重试退避基值
+
+  # mTLS 客户端配置（NICE v2，Phase 3 公网部署）
+  # 生产必须启用：aisaas 监听 :8443 HTTPS+mTLS
+  tls:
+    client_cert_file: "/etc/ykt/certs/xiaozhi-server-go.crt"  # 客户端证书
+    client_key_file: "/etc/ykt/certs/xiaozhi-server-go.key"   # 客户端私钥
+    ca_cert_file: "/etc/ykt/certs/ca.crt"                     # 校验服务端证书的 CA
+    server_name: "ykt-aisaas"                                 # SNI / hostname 校验
+
+# --- 设备配置 ---
+device:
+  mac_id: ""                              # efuse MAC 地址，留空则自动检测
+  encrypted_key_file: "configs/device.key.enc"  # API Key 加密存储路径
+  key_rotate_interval: 24h                # 定时轮换间隔
+  key_rotate_requests: 10000              # 每 N 个请求触发轮换
+
+# --- Redis 配置（限流 + 缓存 + 会话状态） ---
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 100
+  min_idle_conns: 10
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+  pool_timeout: 4s
+  max_retries: 3
+
+# --- MySQL 配置（xiaozhi 本地业务库） ---
+mysql:
+  host: "localhost"
+  port: 3306
+  user: "xiaozhi"
+  password: ""
+  database: "xiaozhi_server"
+  charset: "utf8mb4"
+  max_open_conns: 100
+  max_idle_conns: 10
+  conn_max_lifetime: 3600s
+  conn_max_idle_time: 600s
+  log_level: "warn"             # silent / error / warn / info
+
+# --- 日志配置 ---
+log:
+  level: "info"                 # debug / info / warn / error
+  format: "json"                # json / console
+  output: "stdout"              # stdout / file
+  file_path: "logs/xiaozhi-server-go.log"
+  max_size: 100                 # MB（单文件最大）
+  max_backups: 7                # 保留旧文件数
+  max_age: 30                   # 保留天数
+  compress: true                # 是否压缩旧日志
+
+# --- 可观测性配置 ---
+observability:
+  service_name: "xiaozhi-server-go"
+  service_version: "0.1.0"
+  # Prometheus metrics
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+  # OpenTelemetry tracing
+  tracing:
+    enabled: false
+    exporter: "otlp"            # otlp / jaeger / zipkin / none
+    endpoint: "localhost:4317"
+    sample_rate: 1.0            # 采样率 0.0-1.0
+
+# --- MQTT 配置（可选，P2 阶段启用） ---
+mqtt:
+  enabled: false
+  broker: "tcp://localhost:1883"
+  client_id: "xiaozhi-server-go"
+  username: ""
+  password: ""
+  qos: 1
+  keep_alive: 60s
+  clean_session: true
+  auto_reconnect: true
+
+# --- 视觉跟踪配置（vision-servo v2） ---
+vision:
+  enabled: true
+  camera_fps: 5                    # 帧率 [1-10]
+  follow_gap_ms: 220               # 服务端节流间隔 [100-500]
+  dead_zone_px: 8                  # 死区像素 [8-20]
+  hfov_deg: 65                    # 水平视场角
+  min_pulse_us: 500               # 舵机最小脉冲宽度
+  max_pulse_us: 2500              # 舵机最大脉冲宽度
+  center_pan_us: 1500             # 舵机中位脉冲宽度
+  center_tilt_us: 1500
+  range_pan_deg: 90              # 舵机旋转范围
+  range_tilt_deg: 60
+  invert_pan: false               # 是否反转 pan 方向
+  invert_tilt: false
+  session_secret: "dev-secret-change-in-prod"  # 生产用环境变量覆盖
+  session_ttl: 1h                 # session 有效期
+  aisaas_base_url: ""             # 空则用 aisaas.url
+  require_tls: false              # dev 关闭，prod 强制 true
+  preshared_tokens:              # dev 硬编码，生产替换为 device registry
+    - device_id: "esp32s3-dev-001"
+      token: "dev-token-001"
+    - device_id: "esp32s3-dev-002"
+      token: "dev-token-002"
