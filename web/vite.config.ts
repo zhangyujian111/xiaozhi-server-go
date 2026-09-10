@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   const aisaasTarget = env.VITE_AISAAS_TARGET || 'http://localhost:8190'
 
   return {
+    base: '/xiaozhi-admin/',
     plugins: [vue()],
     resolve: {
       alias: {
