@@ -6,6 +6,9 @@
 
 FROM golang:1.25-alpine AS build
 
+# 切换国内镜像（默认 dl-cdn.alpinelinux.org 在 China 极慢）
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
+
 # build-base: gcc/musl-dev（CGO 必需）
 # pkgconfig:  hraban/opus 通过 pkg-config 定位 libopus
 # opus-dev / opusfile-dev: 头文件 + .pc 文件
