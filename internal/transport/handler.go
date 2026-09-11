@@ -1020,4 +1020,5 @@ func (h *Handler) unregisterVisionFlushHook(deviceID string) {
 	h.visionFlushHooksMu.Lock()
 	defer h.visionFlushHooksMu.Unlock()
 	delete(h.visionFlushHooks, deviceID)
-}
+} 
+ 
