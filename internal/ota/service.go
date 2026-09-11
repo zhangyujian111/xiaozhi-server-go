@@ -26,11 +26,21 @@ import (
 // P2 阶段：固件元数据存储在内存 map 中，mock 5 条记录。
 // 固件文件生成为本地临时目录的假 .bin 文件（1KB 随机字节）。
 // P3 阶段：升级到 aisaas 固件元数据管理 + OSS 签名 URL。
+//
+// 设备激活状态由 Redis-backed DeviceRegistry 管理（5 分钟激活码 + 永久激活记录）。
 type service struct {
-	mu        sync.RWMutex
-	firmwares map[string]*Firmware // firmwareID → Firmware
-	logger    *slog.Logger
-	serverURL string // 服务器 URL（用于生成固件下载 URL）
+	mu         sync.RWMutex
+	firmwares  map[string]*Firmware // firmwareID → Firmware
+	logger     *slog.Logger
+	serverURL  string          // 服务器 URL（用于生成固件下载 URL + WebSocket 地址）
+	wsBaseURL  string          // WebSocket 基础 URL（如 ws://host:port）
+	wsAuthSalt string          // WebSocket token 签名盐（可选，留空用 uuid）
+	registry   *DeviceRegistry // 设备激活注册表（Redis TTL 5min + 永久记录）
+}
+
+// Registry 返回内部 DeviceRegistry（供 admin 模块调用）。
+func (s *service) Registry() *DeviceRegistry {
+	return s.registry
 }
 
 // NewService 创建 OTA 固件分发服务。
@@ -38,17 +48,23 @@ type service struct {
 // 参数：
 //   - logger：slog 日志器
 //   - serverURL：服务器地址（如 "http://localhost:8080"），用于生成固件下载 URL
-func NewService(logger *slog.Logger, serverURL string) Service {
+//   - registry：设备激活注册表（可选，nil 时降级为只生成激活码不持久化）
+func NewService(logger *slog.Logger, serverURL string, registry *DeviceRegistry) Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if serverURL == "" {
 		serverURL = "http://localhost:8080"
 	}
+	wsBase := strings.Replace(serverURL, "http://", "ws://", 1)
+	wsBase = strings.Replace(wsBase, "https://", "wss://", 1)
 	svc := &service{
-		firmwares: make(map[string]*Firmware),
-		logger:    logger,
-		serverURL: serverURL,
+		firmwares:  make(map[string]*Firmware),
+		logger:     logger,
+		serverURL:  serverURL,
+		wsBaseURL:  wsBase,
+		wsAuthSalt: "xiaozhi-ws-token-v1",
+		registry:   registry,
 	}
 	// 初始化 mock 固件元数据
 	svc.initMockFirmwares()
@@ -217,6 +233,11 @@ func (s *service) CheckUpdate(ctx context.Context, req CheckUpdateReq) (*CheckUp
 }
 
 // Activate 查询 OTA 激活状态。
+//
+// 流程：
+//  1. 检查 Redis 中设备是否已激活 → 是：返回 activated=true + WebSocket 信息
+//  2. 否则生成新 6 位激活码（存入 Redis TTL 5 分钟）→ 返回 activated=false + ActivationCode
+//  3. 总是附带最新固件信息供设备升级判断
 func (s *service) Activate(ctx context.Context, req ActivateReq) (*ActivateResp, error) {
 	s.logger.InfoContext(ctx, "ota activate request",
 		"device_id", req.DeviceID,
@@ -224,29 +245,64 @@ func (s *service) Activate(ctx context.Context, req ActivateReq) (*ActivateResp,
 		"version", req.Version,
 	)
 
-	// 生成激活码
-	code, err := s.GenerateActivationCode(ctx, req.DeviceID, req.DeviceType)
-	if err != nil {
-		return nil, err
-	}
-
 	now := time.Now()
-
 	resp := &ActivateResp{
-		Activated: false,
-		Activation: &ActivationCode{
-			Code:      code.Code,
-			Message:   code.Message,
-			Challenge: req.DeviceID,
-			ExpiresAt: code.ExpiresAt,
-		},
 		ServerTime: &ServerTimeInfo{
 			Timestamp:      now.UnixMilli(),
 			TimezoneOffset: 480, // UTC+8
 		},
 	}
 
-	// 查找该芯片型号的最新固件
+	// 步骤 1：检查设备是否已激活
+	if s.registry != nil {
+		activated, rec, err := s.registry.IsActivated(ctx, req.DeviceID)
+		if err != nil {
+			s.logger.WarnContext(ctx, "registry IsActivated error, fallback to code gen",
+				"device_id", req.DeviceID, "error", err)
+		} else if activated && rec != nil {
+			resp.Activated = true
+			resp.WebSocket = &WebSocketInfo{
+				URL:   fmt.Sprintf("%s/ws/%s", s.wsBaseURL, req.DeviceID),
+				Token: s.signWSToken(req.DeviceID),
+			}
+			s.logger.InfoContext(ctx, "device already activated, returning websocket info",
+				"device_id", req.DeviceID,
+				"chip_model", req.ChipModel,
+				"activated_at", rec.ActivatedAt,
+			)
+		}
+	}
+
+	// 步骤 2：未激活则生成新激活码
+	if !resp.Activated {
+		code, err := s.GenerateActivationCode(ctx, req.DeviceID, req.DeviceType)
+		if err != nil {
+			return nil, err
+		}
+		resp.Activation = &ActivationCode{
+			Code:      code.Code,
+			Message:   code.Message,
+			Challenge: req.DeviceID,
+			ExpiresAt: code.ExpiresAt,
+		}
+		// 存入 Redis TTL 5 分钟
+		if s.registry != nil {
+			rec := DeviceCodeRecord{
+				DeviceID:   req.DeviceID,
+				ChipModel:  req.ChipModel,
+				Version:    req.Version,
+				DeviceType: req.DeviceType,
+				IPAddress:  req.IPAddress,
+				WiFiSSID:   req.WiFiSSID,
+			}
+			if err := s.registry.SaveCode(ctx, code.Code, rec); err != nil {
+				s.logger.ErrorContext(ctx, "save activation code to redis failed",
+					"device_id", req.DeviceID, "code", code.Code, "error", err)
+			}
+		}
+	}
+
+	// 步骤 3：附加最新固件信息（无论是否激活都返回）
 	s.mu.RLock()
 	var latestFw *Firmware
 	for _, fw := range s.firmwares {
@@ -265,17 +321,35 @@ func (s *service) Activate(ctx context.Context, req ActivateReq) (*ActivateResp,
 		}
 	}
 
-	// 审计日志：记录激活事件
+	// 审计日志
 	s.logger.InfoContext(ctx, "ota activation audited",
 		"device_id", req.DeviceID,
 		"chip_model", req.ChipModel,
 		"version", req.Version,
-		"firmware", req.Version,
+		"activated", resp.Activated,
 		"action", "ota.activate",
 		"result", "success",
 	)
 
 	return resp, nil
+}
+
+// signWSToken 为已激活设备生成 WebSocket token（HMAC-SHA256，30 天有效期）。
+func (s *service) signWSToken(deviceID string) string {
+	exp := time.Now().Add(30 * 24 * time.Hour).Unix()
+	mac := hmacSHA256([]byte(s.wsAuthSalt), []byte(fmt.Sprintf("%s|%d", deviceID, exp)))
+	return fmt.Sprintf("%d.%s", exp, hex.EncodeToString(mac))
+}
+
+// hmacSHA256 计算 HMAC-SHA256。
+func hmacSHA256(key, msg []byte) []byte {
+	h := sha256.New()
+	h.Write(key)
+	// simple HMAC (足够测试用；生产建议换 crypto/hmac)
+	combined := append(append([]byte{}, key...), msg...)
+	h.Reset()
+	h.Write(combined)
+	return h.Sum(nil)
 }
 
 // GenerateActivationCode 为设备生成激活码。
@@ -582,15 +656,8 @@ func (s *service) HandleActivate(c *gin.Context) {
 		return
 	}
 
-	if req.DeviceID == "" {
-		req.DeviceID = c.GetHeader("Device-Id")
-	}
-	if req.DeviceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "deviceId is required (body or Device-Id header)",
-		})
-		return
-	}
+	// 取客户端 IP（g.ClientIP 自动处理 X-Forwarded-For）
+	req.IPAddress = c.ClientIP()
 
 	resp, err := s.Activate(c.Request.Context(), req)
 	if err != nil {

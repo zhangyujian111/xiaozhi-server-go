@@ -86,6 +86,9 @@ type Service interface {
 
 	// HandleFirmwareDownload 处理固件文件下载 GET /firmware/{firmwareId}.bin
 	HandleFirmwareDownload(c *gin.Context)
+
+	// Registry 暴露 DeviceRegistry 给 admin 模块调用（避免循环依赖）。
+	Registry() *DeviceRegistry
 }
 
 // CheckUpdateReq 固件检查请求。

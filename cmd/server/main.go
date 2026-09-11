@@ -34,6 +34,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/ykt/xiaozhi-server-go/internal/admin"
 	"github.com/ykt/xiaozhi-server-go/internal/asr"
 	"github.com/ykt/xiaozhi-server-go/internal/audio"
 	"github.com/ykt/xiaozhi-server-go/internal/client/aisaas"
@@ -46,6 +47,7 @@ import (
 	"github.com/ykt/xiaozhi-server-go/internal/music"
 	"github.com/ykt/xiaozhi-server-go/internal/observability"
 	"github.com/ykt/xiaozhi-server-go/internal/ota"
+	"github.com/ykt/xiaozhi-server-go/internal/redisclient"
 	"github.com/ykt/xiaozhi-server-go/internal/server"
 	"github.com/ykt/xiaozhi-server-go/internal/session"
 	"github.com/ykt/xiaozhi-server-go/internal/template"
@@ -53,6 +55,8 @@ import (
 	"github.com/ykt/xiaozhi-server-go/internal/tts"
 	"github.com/ykt/xiaozhi-server-go/internal/user"
 	"github.com/ykt/xiaozhi-server-go/internal/vision"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -274,11 +278,32 @@ func main() {
 		"delay_ms", 50,
 	)
 
-	// =========================================================================
-	// 阶段 9: OTA 固件分发服务（HTTP 端点 + 内存元数据）
-	// =========================================================================
+// =========================================================================
+// 阶段 9: OTA 固件分发服务（HTTP 端点 + 内存元数据）
+// =========================================================================
+
+	// 9a: Redis 客户端（设备激活注册表 backend）
+	rdb, err := redisclient.New(ctx, redisclient.Config{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	}, logger)
+	if err != nil {
+		logger.Error("redis init failed (required for device activation)",
+			"addr", cfg.Redis.Addr, "error", err)
+		os.Exit(1)
+	}
+	defer rdb.Close()
+
+	deviceRegistry := ota.NewDeviceRegistry(rdb)
+	logger.Info("phase 9a/13: device registry (Redis) initialized",
+		"code_ttl", "5m",
+		"pending_set", "ota:devices:pending",
+		"activated_set", "ota:devices:activated",
+	)
+
 	serverURL := fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
-	otaSvc := ota.NewService(logger, serverURL)
+	otaSvc := ota.NewService(logger, serverURL, deviceRegistry)
 	logger.Info("phase 9/13: ota firmware service initialized",
 		"server_url", serverURL,
 		"endpoints", []string{
@@ -455,12 +480,49 @@ func main() {
 	)
 
 	// 创建 HTTP/WebSocket 服务
+	// =========================================================================
+	// 阶段 11d: Admin 模块（JWT 鉴权 + 设备激活管理）
+	// =========================================================================
+	adminCfg := admin.Config{
+		Username:     cfg.Admin.Username,
+		PasswordHash: cfg.Admin.PasswordHash,
+		JWTSecret:    cfg.Admin.JWTSecret,
+		TokenTTL:     cfg.Admin.TokenTTL,
+	}
+	if adminCfg.PasswordHash == "" && cfg.Admin.Password != "" {
+		// 启动时若配置了明文密码，自动 bcrypt 后填入 hash
+		h, err := bcrypt.GenerateFromPassword([]byte(cfg.Admin.Password), bcrypt.DefaultCost)
+		if err != nil {
+			logger.Error("admin password bcrypt failed", "error", err)
+			os.Exit(1)
+		}
+		adminCfg.PasswordHash = string(h)
+		logger.Info("admin password auto-hashed from plaintext config")
+	}
+	if adminCfg.JWTSecret == "" || len(adminCfg.JWTSecret) < 32 {
+		logger.Error("admin.jwt_secret must be set and ≥ 32 bytes",
+			"len", len(adminCfg.JWTSecret))
+		os.Exit(1)
+	}
+	adminModule := admin.NewModule(adminCfg, deviceRegistry, logger)
+	logger.Info("phase 11d/14: admin module initialized",
+		"username", adminCfg.Username,
+		"endpoints", []string{
+			"POST /api/admin/auth/login",
+			"GET  /api/admin/auth/me",
+			"POST /api/admin/devices/activate-by-code",
+			"GET  /api/admin/devices/pending",
+			"GET  /api/admin/devices/activated",
+		},
+	)
+
 	wsServer := server.NewServer(server.Config{
 		Addr:       cfg.Server.EffectiveAddr(),
 		Logger:     logger,
 		AISaaS:     aisaasClient,
 		Handler:    wsHandler,
 		OTAHandler: otaSvc,
+		Admin:      adminModule,
 	})
 
 	// 启动服务（非阻塞）

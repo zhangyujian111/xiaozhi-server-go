@@ -6,6 +6,7 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 
 import App from './App.vue'
 import router from './router'
+import { useAuthStore } from '@/stores/auth'
 
 const app = createApp(App)
 
@@ -16,4 +17,7 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus)
+
+// 应用启动前先加载本地 token（router beforeEach 守卫依赖此 store）
+useAuthStore().load()
 app.mount('#app')

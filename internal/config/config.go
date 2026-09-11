@@ -31,6 +31,7 @@ type Config struct {
 	Observability ObservabilityConfig `mapstructure:"observability"`
 	MQTT          MQTTConfig          `mapstructure:"mqtt"`
 	Vision        VisionConfig        `mapstructure:"vision"`
+	Admin         AdminConfig         `mapstructure:"admin"`
 }
 
 // ServerConfig HTTP 服务配置。
@@ -226,6 +227,19 @@ type DeviceToken struct {
 	Token    string `mapstructure:"token"`
 }
 
+// AdminConfig 后台管理 (xiaozhi-admin) 鉴权配置。
+//
+// Username / PasswordHash 用于 /api/admin/auth/login 校验；
+// JWTSecret 用于签发/校验 JWT（HS256，必须 ≥ 32 字节以满足加密强度）；
+// TokenTTL 控制 JWT 有效期（默认 24h）。
+type AdminConfig struct {
+	Username     string        `mapstructure:"username"`
+	Password     string        `mapstructure:"password"`     // 明文（可选），启动时若 PasswordHash 为空则自动 bcrypt
+	PasswordHash string        `mapstructure:"password_hash"` // bcrypt 哈希（优先）
+	JWTSecret    string        `mapstructure:"jwt_secret"`
+	TokenTTL     time.Duration `mapstructure:"token_ttl"`
+}
+
 // DefaultConfig 返回带默认值的配置。
 func DefaultConfig() *Config {
 	return &Config{
@@ -333,6 +347,12 @@ func DefaultConfig() *Config {
 			SessionTTL:   1 * time.Hour,
 			RequireTLS:   false,
 		},
+		Admin: AdminConfig{
+			Username:     "admin",
+			PasswordHash: "$2a$10$NaCw46Rb/Gip4ZLnwz.oteh2TPv6fRHIJEQox2QLWGgcZ6NJB1nDW", // bcrypt of "admin123"
+			JWTSecret:    "change-me-in-prod-min-32-bytes-long-secret",
+			TokenTTL:     24 * time.Hour,
+		},
 	}
 }
 
@@ -361,6 +381,7 @@ func Load(configFile string) (*Config, error) {
 	v.SetDefault("observability", defaults.Observability)
 	v.SetDefault("mqtt", defaults.MQTT)
 	v.SetDefault("vision", defaults.Vision)
+	v.SetDefault("admin", defaults.Admin)
 
 	// 2. 读取配置文件
 	v.SetConfigFile(configFile)

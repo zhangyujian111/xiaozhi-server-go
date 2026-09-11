@@ -33,6 +33,8 @@ type Config struct {
 	// OTAHandler OTA 固件分发 HTTP 处理器（可选）。
 	// 实现 HandleCheckUpdate / HandleActivate / HandleFirmwareDownload 三个 handler。
 	OTAHandler OTAHandler
+	// Admin 后台管理模块（JWT 鉴权 + 设备激活管理）。可选。
+	Admin AdminRegistrar
 }
 
 // OTAHandler OTA HTTP 路由处理器接口。
@@ -41,6 +43,12 @@ type OTAHandler interface {
 	HandleCheckUpdate(c *gin.Context)
 	HandleActivate(c *gin.Context)
 	HandleFirmwareDownload(c *gin.Context)
+}
+
+// AdminRegistrar 路由注册器（由 admin.Module 实现）。
+// server 依赖最小接口：admin 模块自挂路由。
+type AdminRegistrar interface {
+	RegisterRoutes(r gin.IRouter)
 }
 
 // Server HTTP/WebSocket 服务。
@@ -116,6 +124,13 @@ func (s *Server) registerRoutes() {
 				"GET /firmware/:firmwareId",
 			},
 		)
+	}
+
+	// Admin 管理端点（JWT 鉴权）
+	if s.cfg.Admin != nil {
+		adminGroup := s.router.Group("/api/admin")
+		s.cfg.Admin.RegisterRoutes(adminGroup)
+		s.logger.Info("admin endpoints registered", "prefix", "/api/admin")
 	}
 }
 

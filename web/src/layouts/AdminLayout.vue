@@ -16,6 +16,10 @@
           <el-icon><Monitor /></el-icon>
           <span>系统总览</span>
         </el-menu-item>
+        <el-menu-item index="/devices">
+          <el-icon><Iphone /></el-icon>
+          <span>设备激活</span>
+        </el-menu-item>
         <el-menu-item index="/ota">
           <el-icon><Upload /></el-icon>
           <span>OTA 升级</span>
@@ -47,6 +51,18 @@
         <div class="header-right">
           <el-tag v-if="auth.internalToken" type="success" size="small">Internal Token 已配置</el-tag>
           <el-tag v-else type="warning" size="small">未配置 Internal Token</el-tag>
+          <el-dropdown v-if="auth.adminUsername" trigger="click" @command="handleCommand">
+            <span class="user-info">
+              <el-icon><UserFilled /></el-icon>
+              {{ auth.adminUsername }}
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
 
@@ -58,6 +74,7 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import {
   Monitor,
@@ -66,14 +83,27 @@ import {
   Promotion,
   Setting,
   Connection,
-  Link
+  Link,
+  Iphone,
+  UserFilled,
+  ArrowDown
 } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 const auth = useAuthStore()
+const router = useRouter()
 
 function goPortal() {
   const base = (window.location.origin || `${location.protocol}//${location.host}`) + '/portal/'
   window.location.href = base
+}
+
+function handleCommand(cmd: string) {
+  if (cmd === 'logout') {
+    auth.clearAdminSession()
+    ElMessage.info('已退出登录')
+    router.push('/login')
+  }
 }
 </script>
 
@@ -119,5 +149,24 @@ function goPortal() {
   background: #f5f7fa;
   padding: 20px;
   overflow: auto;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: #606266;
+  font-size: 14px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.user-info:hover {
+  background: #f5f7fa;
 }
 </style>
