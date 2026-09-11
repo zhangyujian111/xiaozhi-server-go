@@ -39,9 +39,27 @@ type ServerConfig struct {
 	Host           string        `mapstructure:"host"`
 	Port           int           `mapstructure:"port"`
 	Addr           string        `mapstructure:"addr"`
+	PublicHost     string        `mapstructure:"public_host"` // 暴露给设备的公网域名/IP（如 8.138.16.255），用于生成 OTA 升级 URL 和 WS URL；为空时回退到监听地址
+	PublicPort     int           `mapstructure:"public_port"` // 暴露给设备的公网端口；为空时回退到 Port
 	ReadTimeout    time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout   time.Duration `mapstructure:"write_timeout"`
 	MaxHeaderBytes int           `mapstructure:"max_header_bytes"`
+}
+
+// PublicBaseURL 返回面向设备的公网 HTTP 基址（用于 OTA 升级与激活码 WS URL）。
+func (c ServerConfig) PublicBaseURL() string {
+	host := c.PublicHost
+	if host == "" {
+		host = c.Host
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "localhost"
+		}
+	}
+	port := c.PublicPort
+	if port <= 0 {
+		port = c.Port
+	}
+	return fmt.Sprintf("http://%s:%d", host, port)
 }
 
 // EffectiveAddr 返回实际监听地址（优先使用 addr 字段，否则拼接 host:port）。

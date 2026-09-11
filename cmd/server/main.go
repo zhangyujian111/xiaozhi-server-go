@@ -302,7 +302,7 @@ func main() {
 		"activated_set", "ota:devices:activated",
 	)
 
-	serverURL := fmt.Sprintf("http://localhost:%d", cfg.Server.Port)
+	serverURL := cfg.Server.PublicBaseURL()
 	otaSvc := ota.NewService(logger, serverURL, deviceRegistry)
 	logger.Info("phase 9/13: ota firmware service initialized",
 		"server_url", serverURL,

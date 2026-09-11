@@ -11,6 +11,11 @@ server:
   host: "0.0.0.0"
   port: 8080
   addr: "0.0.0.0:8080"
+  # public_host/public_port 决定 OTA 升级与激活返回的 ws:// URL 给设备用
+  # （设备无法连 localhost）。部署到公网时改为公网地址（如 8.138.16.255）
+  # 本地开发留空即可（默认回退到 host:port）
+  public_host: ""            # 例如 "8.138.16.255"
+  public_port: 0             # 0 = 使用 port
   read_timeout: 30s
   write_timeout: 30s
   max_header_bytes: 1048576  # 1MB
