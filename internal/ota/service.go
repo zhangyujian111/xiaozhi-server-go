@@ -1,12 +1,14 @@
 package ota
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -495,12 +497,87 @@ func (s *service) HandleCheckUpdate(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// parseActivateReq 解析激活请求，兼容 Java 标准 xiaozhi 固件 schema 与 Go schema。
+//
+// Java schema: {"mac_address":"AA:BB:...","chip_model_name":"esp32s3",
+//               "application":{"version":"2.2.6"},"board":{"ssid":"...","type":"wifi"}}
+// Go schema:    {"deviceId":"...","chipModel":"...","deviceType":"...","version":"...","wifiSsid":"..."}
+//
+// 空 body 也允许（Device-Id header 会作为兜底）。
+func parseActivateReq(body []byte) (ActivateReq, error) {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return ActivateReq{}, nil
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return ActivateReq{}, err
+	}
+	req := ActivateReq{}
+
+	// 直接字段（Go schema）
+	if s, ok := raw["deviceId"].(string); ok {
+		req.DeviceID = s
+	} else if s, ok := raw["mac"].(string); ok {
+		req.DeviceID = s
+	} else if s, ok := raw["mac_address"].(string); ok {
+		req.DeviceID = s
+	}
+	if s, ok := raw["chipModel"].(string); ok {
+		req.ChipModel = s
+	} else if s, ok := raw["chip_model_name"].(string); ok {
+		req.ChipModel = s
+	}
+	if s, ok := raw["deviceType"].(string); ok {
+		req.DeviceType = s
+	}
+	if s, ok := raw["version"].(string); ok {
+		req.Version = s
+	} else if app, ok := raw["application"].(map[string]interface{}); ok {
+		if s, ok := app["version"].(string); ok {
+			req.Version = s
+		}
+	}
+	if s, ok := raw["wifiSsid"].(string); ok {
+		req.WiFiSSID = s
+	} else if board, ok := raw["board"].(map[string]interface{}); ok {
+		if s, ok := board["ssid"].(string); ok {
+			req.WiFiSSID = s
+		}
+		if req.DeviceType == "" {
+			if s, ok := board["type"].(string); ok {
+				req.DeviceType = s
+			}
+		}
+	}
+
+	return req, nil
+}
+
 // HandleActivate 处理 POST /api/device/ota/activate
+//
+// 兼容两种请求体 schema：
+//  1. Go schema: {"deviceId":"...","chipModel":"...","deviceType":"...","version":"...","wifiSsid":"..."}
+//  2. Java 标准 xiaozhi 固件 schema: {"mac_address":"...","chip_model_name":"...","application":{"version":"..."},"board":{"ssid":"...","type":"..."}}
 func (s *service) HandleActivate(c *gin.Context) {
-	var req ActivateReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("read body: %v", err)})
+		return
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+
+	req, err := parseActivateReq(body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid request body: %v", err)})
+		return
+	}
+
+	if req.DeviceID == "" {
+		req.DeviceID = c.GetHeader("Device-Id")
+	}
+	if req.DeviceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": fmt.Sprintf("invalid request body: %v", err),
+			"error": "deviceId is required (body or Device-Id header)",
 		})
 		return
 	}
