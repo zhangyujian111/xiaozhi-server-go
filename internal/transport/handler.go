@@ -546,10 +546,21 @@ func (h *Handler) serveJSONRPC(ctx context.Context, conn IConn) {
 }
 
 // dispatch 处理单条 JSON-RPC 消息。
+//
+// 同时兼容两种格式：
+//   1. 严格 JSON-RPC 2.0：{"jsonrpc":"2.0","id":N,"method":"X","params":{...}}
+//   2. 旧版 vision-servo v1 裸 type 消息：{"type":"hello","id":N,...}（无 jsonrpc envelope）
+//
+// 当 ParseRequest 失败但消息含顶层 "type" 字段时，回退到 legacy 调度。
 func (h *Handler) dispatch(ctx context.Context, conn IConn, data []byte) {
 	// 解析 JSON-RPC 请求
 	req, err := ParseRequest(data)
 	if err != nil {
+		// legacy 格式 fallback：vision-servo v1 客户端发的是裸 {"type":"hello","id":N,...}
+		if legacyType, id, params := parseLegacyEnvelope(data); legacyType != "" {
+			h.dispatchLegacy(ctx, conn, legacyType, id, params)
+			return
+		}
 		h.sendError(conn, nil, ErrCodeParse, "Parse error", err.Error())
 		return
 	}
@@ -600,8 +611,97 @@ func (h *Handler) dispatch(ctx context.Context, conn IConn, data []byte) {
 	_ = conn.SendCmd(respData)
 }
 
+// parseLegacyEnvelope 从裸 type 消息中提取 (type, id, params)。
+//
+// 返回值：
+//   - type: 消息 type 字段（如 "hello"）；若无顶层 type 或 type 为空，返回 ""
+//   - id: 顶层 id 字段（int64）；可为 nil（通知类）
+//   - params: 去除 type/id 后的整个 JSON 对象作为 RawMessage
+//
+// 用途：vision-servo v1 客户端直接发 {"type":"hello","id":6,...} 而非
+//      {"jsonrpc":"2.0","id":6,"method":"hello","params":{...}}，原 ParseRequest
+//      会拒绝（"invalid version"）。这里给出 fallback。
+func parseLegacyEnvelope(data []byte) (string, *int64, json.RawMessage) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(data, &probe); err != nil {
+		return "", nil, nil
+	}
+	typeRaw, ok := probe["type"]
+	if !ok {
+		return "", nil, nil
+	}
+	var typeStr string
+	if err := json.Unmarshal(typeRaw, &typeStr); err != nil || typeStr == "" {
+		return "", nil, nil
+	}
+	var id *int64
+	if idRaw, ok := probe["id"]; ok {
+		var v int64
+		if err := json.Unmarshal(idRaw, &v); err == nil {
+			id = &v
+		}
+	}
+	return typeStr, id, data
+}
+
+// dispatchLegacy 将 legacy type 消息路由到对应处理器。
+//
+// 当前支持：
+//   - "hello"：调用 OnHello 回调，返回 hello_ack（裸 type，无 jsonrpc envelope）
+//   - 其他 type：忽略（warn + 不响应，避免误关连接）
+//
+// 设备 ID 取自 conn.DeviceID()（URL 路径 /ws/:deviceId），与 OnHello 入参对齐。
+func (h *Handler) dispatchLegacy(ctx context.Context, conn IConn, msgType string, id *int64, params json.RawMessage) {
+	h.logger.Debug().
+		Str("device_id", conn.DeviceID()).
+		Str("msg_type", msgType).
+		Msg("legacy message received")
+
+switch msgType {
+case "hello":
+	if h.OnHello == nil {
+		h.logger.Warn().Str("device_id", conn.DeviceID()).Msg("legacy hello: OnHello not registered")
+		return
+	}
+	// 直接把 params 当作 HelloMessage
+	var hello HelloMessage
+	if err := json.Unmarshal(params, &hello); err != nil {
+		h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: parse failed")
+		return
+	}
+	resp, err := h.OnHello(ctx, &hello)
+	if err != nil {
+		h.logger.Error().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: OnHello error")
+		return
+	}
+	// 构造 legacy hello_ack：保留顶层 type/id/transport/version/session_id/server_time
+	// 不加 jsonrpc envelope（设备期望的就是裸 type 帧）
+	ack := map[string]interface{}{
+		"type":        resp.Type,
+		"transport":   resp.Transport,
+		"session_id":  resp.SessionID,
+		"server_time": resp.ServerTime,
+		"version":     resp.Version,
+	}
+	if id != nil {
+		ack["id"] = *id
+	}
+	ackData, err := json.Marshal(ack)
+	if err != nil {
+		return
+	}
+	if err := conn.SendCmd(ackData); err != nil {
+		h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: send ack failed")
+	}
+default:
+	h.logger.Warn().
+		Str("device_id", conn.DeviceID()).
+		Str("msg_type", msgType).
+		Msg("unknown legacy message type, ignoring")
+}
+}
+
 // sendError 发送 JSON-RPC 错误响应。
-func (h *Handler) sendError(conn IConn, id *int64, code int, message string, data interface{}) {
 	resp, err := NewErrorResponse(id, code, message, data)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to create error response")
