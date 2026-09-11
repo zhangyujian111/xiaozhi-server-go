@@ -104,11 +104,15 @@ func (s *Server) registerRoutes() {
 	if s.cfg.OTAHandler != nil {
 		s.router.GET("/api/device/ota", s.cfg.OTAHandler.HandleCheckUpdate)
 		s.router.POST("/api/device/ota/activate", s.cfg.OTAHandler.HandleActivate)
+		// 兼容标准 Xiaozhi ESP32 固件：它默认 POST /api/device/ota（不带 /activate 后缀）
+		// 参考 Java 版 DeviceController 同时挂两个 endpoint。
+		s.router.POST("/api/device/ota", s.cfg.OTAHandler.HandleActivate)
 		s.router.GET("/firmware/:firmwareId", s.cfg.OTAHandler.HandleFirmwareDownload)
 		s.logger.Info("ota endpoints registered",
 			"endpoints", []string{
 				"GET /api/device/ota",
 				"POST /api/device/ota/activate",
+				"POST /api/device/ota (alias for activate, legacy firmware compat)",
 				"GET /firmware/:firmwareId",
 			},
 		)
