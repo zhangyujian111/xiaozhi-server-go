@@ -1,6 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AdminLayout from '@/layouts/AdminLayout.vue'
 
+// 路由说明：
+// - /xiaozhi-admin/ 是 ESP32 设备管理专用页（OTA / WebSocket 调试 / 设备连接设置）
+// - 模型/记忆/人设/会话/MCP 等 AI 平台配置已迁到 /portal (ykt-aisaas web) 统一管理
 const router = createRouter({
   history: createWebHistory('/xiaozhi-admin/'),
   routes: [
@@ -13,11 +16,6 @@ const router = createRouter({
         { path: 'ota', name: 'ota', component: () => import('@/views/OTA.vue'), meta: { title: 'OTA 升级' } },
         { path: 'ws', name: 'ws', component: () => import('@/views/WebSocket.vue'), meta: { title: '设备 WebSocket' } },
         { path: 'chat', name: 'chat', component: () => import('@/views/Chat.vue'), meta: { title: '文本对话' } },
-        { path: 'memory', name: 'memory', component: () => import('@/views/Memory.vue'), meta: { title: '记忆管理' } },
-        { path: 'sessions', name: 'sessions', component: () => import('@/views/Sessions.vue'), meta: { title: '会话管理' } },
-        { path: 'personas', name: 'personas', component: () => import('@/views/Personas.vue'), meta: { title: '人设' } },
-        { path: 'mcp', name: 'mcp', component: () => import('@/views/MCP.vue'), meta: { title: 'MCP 工具' } },
-        { path: 'models', name: 'models', component: () => import('@/views/Models.vue'), meta: { title: '模型管理' } },
         { path: 'settings', name: 'settings', component: () => import('@/views/Settings.vue'), meta: { title: '连接设置' } }
       ]
     }

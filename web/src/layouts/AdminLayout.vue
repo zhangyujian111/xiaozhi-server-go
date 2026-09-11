@@ -28,29 +28,13 @@
           <el-icon><Promotion /></el-icon>
           <span>文本对话</span>
         </el-menu-item>
-        <el-menu-item index="/memory">
-          <el-icon><Notebook /></el-icon>
-          <span>记忆管理</span>
-        </el-menu-item>
-        <el-menu-item index="/sessions">
-          <el-icon><Timer /></el-icon>
-          <span>会话管理</span>
-        </el-menu-item>
-        <el-menu-item index="/personas">
-          <el-icon><User /></el-icon>
-          <span>人设</span>
-        </el-menu-item>
-        <el-menu-item index="/mcp">
-          <el-icon><Tools /></el-icon>
-          <span>MCP 工具</span>
-        </el-menu-item>
-        <el-menu-item index="/models">
-          <el-icon><Box /></el-icon>
-          <span>模型管理</span>
-        </el-menu-item>
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
           <span>连接设置</span>
+        </el-menu-item>
+        <el-menu-item index="/portal" @click="goPortal">
+          <el-icon><Link /></el-icon>
+          <span>AI 配置中心 → /portal</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -80,16 +64,17 @@ import {
   Upload,
   ChatDotRound,
   Promotion,
-  Notebook,
-  Timer,
-  User,
-  Tools,
   Setting,
   Connection,
-  Box
+  Link
 } from '@element-plus/icons-vue'
 
 const auth = useAuthStore()
+
+function goPortal() {
+  const base = (window.location.origin || `${location.protocol}//${location.host}`) + '/portal/'
+  window.location.href = base
+}
 </script>
 
 <style scoped>
