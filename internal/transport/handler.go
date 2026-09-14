@@ -409,7 +409,6 @@ func (h *Handler) readLoop(ws *wsConn) {
 		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
-	h.logger.Info().Str("device_id", ws.deviceID).Msg("readLoop waiting for ReadMessage")
 
 	for {
 		msgType, data, err := conn.ReadMessage()
@@ -434,11 +433,6 @@ func (h *Handler) readLoop(ws *wsConn) {
 
 		switch msgType {
 		case websocket.TextMessage:
-			h.logger.Info().
-				Str("device_id", ws.deviceID).
-				Int("len", len(data)).
-				Str("raw", string(data[:min(120, len(data))])).
-				Msg("WS text frame received")
 			// JSON-RPC 命令帧
 			select {
 			case ws.cmdCh <- data:
@@ -458,12 +452,6 @@ func (h *Handler) readLoop(ws *wsConn) {
 				continue
 			}
 			frameType := data[0]
-			h.logger.Info().
-				Str("device_id", ws.deviceID).
-				Int("len", len(data)).
-				Uint8("frame_type", frameType).
-				Str("hex_preview", fmt.Sprintf("%x", data[:min(32, len(data))])).
-				Msg("WS binary frame received")
 			switch {
 			case frameType <= 0x02:
 				// 音频帧 (0x00/0x01/0x02)
@@ -493,7 +481,6 @@ func (h *Handler) readLoop(ws *wsConn) {
 					Str("device_id", ws.deviceID).
 					Uint8("frame_type", frameType).
 					Int("len", len(data)).
-					Str("hex_preview", fmt.Sprintf("%x", data[:min(32, len(data))])).
 					Msg("unknown binary frame type, dropping (not closing)")
 			}
 		}
@@ -505,9 +492,14 @@ func (h *Handler) readLoop(ws *wsConn) {
 // 通过消息首字节判断帧类型：'{' 开头为文本帧（JSON-RPC），否则为二进制帧（音频）。
 // 同时处理心跳 ping 发送。
 func (h *Handler) writeLoop(ws *wsConn) {
-	h.logger.Info().Str("device_id", ws.deviceID).Msg("writeLoop entered")
 	ticker := time.NewTicker(h.cfg.PingInterval)
 	defer ticker.Stop()
+
+	// 防御：cfg.WriteWait=0 会让 WriteMessage deadline 立即过期 → i/o timeout
+	writeWait := h.cfg.WriteWait
+	if writeWait < time.Second {
+		writeWait = 10 * time.Second
+	}
 
 	for {
 		select {
@@ -521,17 +513,6 @@ func (h *Handler) writeLoop(ws *wsConn) {
 				msgType = websocket.TextMessage
 			}
 
-			h.logger.Info().
-				Str("device_id", ws.deviceID).
-				Int("len", len(data)).
-				Bool("text", msgType == websocket.TextMessage).
-				Dur("write_wait", h.cfg.WriteWait).
-				Msg("writeLoop writing message")
-			// 防御：cfg.WriteWait=0 会让 WriteMessage deadline 立即过期 → i/o timeout
-			writeWait := h.cfg.WriteWait
-			if writeWait < time.Second {
-				writeWait = 10 * time.Second
-			}
 			_ = ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := ws.conn.WriteMessage(msgType, data); err != nil {
 				h.logger.Warn().
@@ -540,17 +521,8 @@ func (h *Handler) writeLoop(ws *wsConn) {
 					Msg("websocket write error")
 				return
 			}
-			h.logger.Info().
-				Str("device_id", ws.deviceID).
-				Int("len", len(data)).
-				Bool("text", msgType == websocket.TextMessage).
-				Msg("writeLoop wrote message OK")
 		case <-ticker.C:
-			pingWait := h.cfg.WriteWait
-			if pingWait < time.Second {
-				pingWait = 10 * time.Second
-			}
-			_ = ws.conn.SetWriteDeadline(time.Now().Add(pingWait))
+			_ = ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				h.logger.Warn().
 					Err(err).
@@ -581,30 +553,17 @@ func (h *Handler) ServeJSONRPC(ctx context.Context, conn IConn) error {
 
 // serveJSONRPC 在 goroutine 中运行 JSON-RPC 分发循环。
 func (h *Handler) serveJSONRPC(ctx context.Context, conn IConn) {
-	h.logger.Info().Str("device_id", conn.DeviceID()).Msg("serveJSONRPC entered")
 	for {
 		select {
 		case data, ok := <-conn.RecvCmd():
 			if !ok {
 				return
 			}
-			h.logger.Info().
-				Str("device_id", conn.DeviceID()).
-				Int("len", len(data)).
-				Str("preview", string(data[:min(120, len(data))])).
-				Msg("json-rpc text frame received")
 			h.dispatch(ctx, conn, data)
 		case <-ctx.Done():
 			return
 		}
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // dispatch 处理单条 JSON-RPC 消息。
@@ -670,10 +629,9 @@ func (h *Handler) dispatch(ctx context.Context, conn IConn, data []byte) {
 	if err != nil {
 		return
 	}
-	h.logger.Info().
+	h.logger.Debug().
 		Str("device_id", conn.DeviceID()).
 		Str("method", req.Method).
-		Str("response_preview", string(respData[:min(200, len(respData))])).
 		Msg("dispatch sending JSON-RPC response")
 	if err := conn.SendCmd(respData); err != nil {
 		h.logger.Warn().
@@ -725,59 +683,54 @@ func parseLegacyEnvelope(data []byte) (string, *int64, json.RawMessage) {
 //
 // 设备 ID 取自 conn.DeviceID()（URL 路径 /ws/:deviceId），与 OnHello 入参对齐。
 func (h *Handler) dispatchLegacy(ctx context.Context, conn IConn, msgType string, id *int64, params json.RawMessage) {
-	h.logger.Info().
+	h.logger.Debug().
 		Str("device_id", conn.DeviceID()).
 		Str("msg_type", msgType).
 		Int("params_len", len(params)).
-		Str("params_preview", string(params[:min(120, len(params))])).
-		Msg("legacy message received")
+		Msg("dispatchLegacy received")
 
-switch msgType {
-case "hello":
-	if h.OnHello == nil {
-		h.logger.Warn().Str("device_id", conn.DeviceID()).Msg("legacy hello: OnHello not registered")
-		return
+	switch msgType {
+	case "hello":
+		if h.OnHello == nil {
+			h.logger.Warn().Str("device_id", conn.DeviceID()).Msg("legacy hello: OnHello not registered")
+			return
+		}
+		// 直接把 params 当作 HelloMessage
+		var hello HelloMessage
+		if err := json.Unmarshal(params, &hello); err != nil {
+			h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: parse failed")
+			return
+		}
+		resp, err := h.OnHello(ctx, &hello)
+		if err != nil {
+			h.logger.Error().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: OnHello error")
+			return
+		}
+		// 构造 legacy hello_ack：保留顶层 type/id/transport/version/session_id/server_time
+		// 不加 jsonrpc envelope（设备期望的就是裸 type 帧）
+		ack := map[string]interface{}{
+			"type":        resp.Type,
+			"transport":   resp.Transport,
+			"session_id":  resp.SessionID,
+			"server_time": resp.ServerTime,
+			"version":     resp.Version,
+		}
+		if id != nil {
+			ack["id"] = *id
+		}
+		ackData, err := json.Marshal(ack)
+		if err != nil {
+			return
+		}
+		if err := conn.SendCmd(ackData); err != nil {
+			h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: send ack failed")
+		}
+	default:
+		h.logger.Warn().
+			Str("device_id", conn.DeviceID()).
+			Str("msg_type", msgType).
+			Msg("unknown legacy message type, ignoring")
 	}
-	// 直接把 params 当作 HelloMessage
-	var hello HelloMessage
-	if err := json.Unmarshal(params, &hello); err != nil {
-		h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: parse failed")
-		return
-	}
-	resp, err := h.OnHello(ctx, &hello)
-	if err != nil {
-		h.logger.Error().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: OnHello error")
-		return
-	}
-	// 构造 legacy hello_ack：保留顶层 type/id/transport/version/session_id/server_time
-	// 不加 jsonrpc envelope（设备期望的就是裸 type 帧）
-	ack := map[string]interface{}{
-		"type":        resp.Type,
-		"transport":   resp.Transport,
-		"session_id":  resp.SessionID,
-		"server_time": resp.ServerTime,
-		"version":     resp.Version,
-	}
-	if id != nil {
-		ack["id"] = *id
-	}
-	ackData, err := json.Marshal(ack)
-	if err != nil {
-		return
-	}
-	h.logger.Info().
-		Str("device_id", conn.DeviceID()).
-		Str("ack_preview", string(ackData[:min(200, len(ackData))])).
-		Msg("dispatchLegacy sending hello_ack")
-	if err := conn.SendCmd(ackData); err != nil {
-		h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: send ack failed")
-	}
-default:
-	h.logger.Warn().
-		Str("device_id", conn.DeviceID()).
-		Str("msg_type", msgType).
-		Msg("unknown legacy message type, ignoring")
-}
 }
 
 // sendError 发送 JSON-RPC 错误响应。
