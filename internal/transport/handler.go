@@ -418,16 +418,13 @@ func (h *Handler) readLoop(ws *wsConn) {
 
 		switch msgType {
 		case websocket.TextMessage:
+			h.logger.Info().
+				Str("device_id", ws.deviceID).
+				Int("len", len(data)).
+				Str("raw", string(data[:min(120, len(data))])).
+				Msg("WS text frame received")
 			// JSON-RPC 命令帧
-			select {
-			case ws.cmdCh <- data:
-			case <-ws.ctx.Done():
-				return
-			default:
-				h.logger.Warn().
-					Str("device_id", ws.deviceID).
-					Msg("cmd channel full, dropping message")
-			}
+			_ = data
 		case websocket.BinaryMessage:
 			// 二进制帧：根据首字节分发到 audioCh 或 videoCh
 			if len(data) == 0 {
@@ -437,6 +434,12 @@ func (h *Handler) readLoop(ws *wsConn) {
 				continue
 			}
 			frameType := data[0]
+			h.logger.Info().
+				Str("device_id", ws.deviceID).
+				Int("len", len(data)).
+				Uint8("frame_type", frameType).
+				Str("hex_preview", fmt.Sprintf("%x", data[:min(32, len(data))])).
+				Msg("WS binary frame received")
 			switch {
 			case frameType <= 0x02:
 				// 音频帧 (0x00/0x01/0x02)
@@ -461,12 +464,13 @@ func (h *Handler) readLoop(ws *wsConn) {
 						Msg("video channel full, dropping frame")
 				}
 			default:
-				// 未知帧类型，关闭连接
-				h.logger.Error().
+				// 未知帧类型：仅记录 + 丢弃，不关闭连接（设备 hello/心跳可能用未登记 binary 类型）
+				h.logger.Warn().
 					Str("device_id", ws.deviceID).
 					Uint8("frame_type", frameType).
-					Msg("unknown binary frame type, closing connection")
-				return
+					Int("len", len(data)).
+					Str("hex_preview", fmt.Sprintf("%x", data[:min(32, len(data))])).
+					Msg("unknown binary frame type, dropping (not closing)")
 			}
 		}
 	}
