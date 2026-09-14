@@ -440,7 +440,15 @@ func (h *Handler) readLoop(ws *wsConn) {
 				Str("raw", string(data[:min(120, len(data))])).
 				Msg("WS text frame received")
 			// JSON-RPC 命令帧
-			_ = data
+			select {
+			case ws.cmdCh <- data:
+			case <-ws.ctx.Done():
+				return
+			default:
+				h.logger.Warn().
+					Str("device_id", ws.deviceID).
+					Msg("cmd channel full, dropping message")
+			}
 		case websocket.BinaryMessage:
 			// 二进制帧：根据首字节分发到 audioCh 或 videoCh
 			if len(data) == 0 {
