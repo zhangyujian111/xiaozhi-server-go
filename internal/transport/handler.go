@@ -640,7 +640,18 @@ func (h *Handler) dispatch(ctx context.Context, conn IConn, data []byte) {
 	if err != nil {
 		return
 	}
-	_ = conn.SendCmd(respData)
+	h.logger.Info().
+		Str("device_id", conn.DeviceID()).
+		Str("method", req.Method).
+		Str("response_preview", string(respData[:min(200, len(respData))])).
+		Msg("dispatch sending JSON-RPC response")
+	if err := conn.SendCmd(respData); err != nil {
+		h.logger.Warn().
+			Err(err).
+			Str("device_id", conn.DeviceID()).
+			Str("method", req.Method).
+			Msg("dispatch SendCmd failed")
+	}
 }
 
 // parseLegacyEnvelope 从裸 type 消息中提取 (type, id, params)。
@@ -724,6 +735,10 @@ case "hello":
 	if err != nil {
 		return
 	}
+	h.logger.Info().
+		Str("device_id", conn.DeviceID()).
+		Str("ack_preview", string(ackData[:min(200, len(ackData))])).
+		Msg("dispatchLegacy sending hello_ack")
 	if err := conn.SendCmd(ackData); err != nil {
 		h.logger.Warn().Err(err).Str("device_id", conn.DeviceID()).Msg("legacy hello: send ack failed")
 	}
