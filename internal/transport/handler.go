@@ -538,11 +538,23 @@ func (h *Handler) serveJSONRPC(ctx context.Context, conn IConn) {
 			if !ok {
 				return
 			}
+			h.logger.Info().
+				Str("device_id", conn.DeviceID()).
+				Int("len", len(data)).
+				Str("preview", string(data[:min(120, len(data))])).
+				Msg("json-rpc text frame received")
 			h.dispatch(ctx, conn, data)
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // dispatch 处理单条 JSON-RPC 消息。
@@ -652,9 +664,11 @@ func parseLegacyEnvelope(data []byte) (string, *int64, json.RawMessage) {
 //
 // 设备 ID 取自 conn.DeviceID()（URL 路径 /ws/:deviceId），与 OnHello 入参对齐。
 func (h *Handler) dispatchLegacy(ctx context.Context, conn IConn, msgType string, id *int64, params json.RawMessage) {
-	h.logger.Debug().
+	h.logger.Info().
 		Str("device_id", conn.DeviceID()).
 		Str("msg_type", msgType).
+		Int("params_len", len(params)).
+		Str("params_preview", string(params[:min(120, len(params))])).
 		Msg("legacy message received")
 
 switch msgType {
