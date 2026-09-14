@@ -428,6 +428,21 @@ func Load(configFile string) (*Config, error) {
 		cfg.Server.Addr = cfg.Server.EffectiveAddr()
 	}
 
+	// 5.1 防御：viper 在嵌套 struct unmarshal 时若 yaml 缺失子字段会覆盖 default 的零值
+	// 这里把所有 WebSocket 时长兜底为合理默认值（避免 cfg.WriteWait=0 导致 i/o timeout）
+	if cfg.WebSocket.WriteWait <= 0 {
+		cfg.WebSocket.WriteWait = 10 * time.Second
+	}
+	if cfg.WebSocket.PongWait <= 0 {
+		cfg.WebSocket.PongWait = 60 * time.Second
+	}
+	if cfg.WebSocket.PingInterval <= 0 {
+		cfg.WebSocket.PingInterval = 30 * time.Second
+	}
+	if cfg.WebSocket.HandshakeTimeout <= 0 {
+		cfg.WebSocket.HandshakeTimeout = 10 * time.Second
+	}
+
 	return &cfg, nil
 }
 

@@ -527,7 +527,12 @@ func (h *Handler) writeLoop(ws *wsConn) {
 				Bool("text", msgType == websocket.TextMessage).
 				Dur("write_wait", h.cfg.WriteWait).
 				Msg("writeLoop writing message")
-			_ = ws.conn.SetWriteDeadline(time.Now().Add(h.cfg.WriteWait))
+			// 防御：cfg.WriteWait=0 会让 WriteMessage deadline 立即过期 → i/o timeout
+			writeWait := h.cfg.WriteWait
+			if writeWait < time.Second {
+				writeWait = 10 * time.Second
+			}
+			_ = ws.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := ws.conn.WriteMessage(msgType, data); err != nil {
 				h.logger.Warn().
 					Err(err).
@@ -541,7 +546,11 @@ func (h *Handler) writeLoop(ws *wsConn) {
 				Bool("text", msgType == websocket.TextMessage).
 				Msg("writeLoop wrote message OK")
 		case <-ticker.C:
-			_ = ws.conn.SetWriteDeadline(time.Now().Add(h.cfg.WriteWait))
+			pingWait := h.cfg.WriteWait
+			if pingWait < time.Second {
+				pingWait = 10 * time.Second
+			}
+			_ = ws.conn.SetWriteDeadline(time.Now().Add(pingWait))
 			if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				h.logger.Warn().
 					Err(err).
