@@ -389,18 +389,24 @@ func extractDeviceID(path string) string {
 //   - 0x03：视频帧（JPEG）→ videoCh
 //   - 其他：关闭连接
 func (h *Handler) readLoop(ws *wsConn) {
+	// 防御：cfg.PongWait=0 会让 ReadMessage deadline 立即过期，readLoop 立刻退出。
+	// 这里兜底：PongWait 未配置或 < 10s 时强制用 60s。
+	pongWait := h.cfg.PongWait
+	if pongWait < 10*time.Second {
+		pongWait = 60 * time.Second
+	}
 	h.logger.Info().
 		Str("device_id", ws.deviceID).
-		Dur("pong_wait", h.cfg.PongWait).
+		Dur("pong_wait", pongWait).
 		Int64("max_msg_size", h.cfg.MaxMessageSize).
 		Msg("readLoop entered")
 	defer ws.cancel() // 取消 context，通知所有 goroutine 退出
 
 	conn := ws.conn
 	conn.SetReadLimit(h.cfg.MaxMessageSize)
-	_ = conn.SetReadDeadline(time.Now().Add(h.cfg.PongWait))
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(h.cfg.PongWait))
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
 	h.logger.Info().Str("device_id", ws.deviceID).Msg("readLoop waiting for ReadMessage")
