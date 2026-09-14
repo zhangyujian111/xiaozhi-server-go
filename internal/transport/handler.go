@@ -389,6 +389,7 @@ func extractDeviceID(path string) string {
 //   - 0x03：视频帧（JPEG）→ videoCh
 //   - 其他：关闭连接
 func (h *Handler) readLoop(ws *wsConn) {
+	h.logger.Info().Str("device_id", ws.deviceID).Msg("readLoop entered")
 	defer ws.cancel() // 取消 context，通知所有 goroutine 退出
 
 	conn := ws.conn
@@ -398,10 +399,15 @@ func (h *Handler) readLoop(ws *wsConn) {
 		_ = conn.SetReadDeadline(time.Now().Add(h.cfg.PongWait))
 		return nil
 	})
+	h.logger.Info().Str("device_id", ws.deviceID).Msg("readLoop waiting for ReadMessage")
 
 	for {
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
+			h.logger.Info().
+				Err(err).
+				Str("device_id", ws.deviceID).
+				Msg("readLoop ReadMessage returned error")
 			if !websocket.IsUnexpectedCloseError(err,
 				websocket.CloseGoingAway,
 				websocket.CloseNormalClosure,
