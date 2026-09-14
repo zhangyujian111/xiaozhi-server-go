@@ -125,7 +125,12 @@ func (c *wsConn) RecvVideo() <-chan []byte { return c.videoCh }
 
 // SendCmd 发送命令。
 func (c *wsConn) SendCmd(data []byte) error {
-	// TODO(T9): 实现非阻塞发送到 writeCh
+	// 防御：避免在 Close() 之后 send on closed channel
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("send on cancelled connection")
+	default:
+	}
 	select {
 	case c.writeCh <- data:
 		return nil
@@ -136,7 +141,12 @@ func (c *wsConn) SendCmd(data []byte) error {
 
 // SendAudio 发送音频数据。
 func (c *wsConn) SendAudio(data []byte) error {
-	// TODO(T9): 实现二进制帧发送
+	// 防御：避免在 Close() 之后 send on closed channel
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("send on cancelled connection")
+	default:
+	}
 	select {
 	case c.writeCh <- data:
 		return nil
