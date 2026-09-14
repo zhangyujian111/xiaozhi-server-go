@@ -505,6 +505,7 @@ func (h *Handler) readLoop(ws *wsConn) {
 // 通过消息首字节判断帧类型：'{' 开头为文本帧（JSON-RPC），否则为二进制帧（音频）。
 // 同时处理心跳 ping 发送。
 func (h *Handler) writeLoop(ws *wsConn) {
+	h.logger.Info().Str("device_id", ws.deviceID).Msg("writeLoop entered")
 	ticker := time.NewTicker(h.cfg.PingInterval)
 	defer ticker.Stop()
 
@@ -534,6 +535,11 @@ func (h *Handler) writeLoop(ws *wsConn) {
 					Msg("websocket write error")
 				return
 			}
+			h.logger.Info().
+				Str("device_id", ws.deviceID).
+				Int("len", len(data)).
+				Bool("text", msgType == websocket.TextMessage).
+				Msg("writeLoop wrote message OK")
 		case <-ticker.C:
 			_ = ws.conn.SetWriteDeadline(time.Now().Add(h.cfg.WriteWait))
 			if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
