@@ -520,6 +520,12 @@ func (h *Handler) writeLoop(ws *wsConn) {
 				msgType = websocket.TextMessage
 			}
 
+			h.logger.Info().
+				Str("device_id", ws.deviceID).
+				Int("len", len(data)).
+				Bool("text", msgType == websocket.TextMessage).
+				Dur("write_wait", h.cfg.WriteWait).
+				Msg("writeLoop writing message")
 			_ = ws.conn.SetWriteDeadline(time.Now().Add(h.cfg.WriteWait))
 			if err := ws.conn.WriteMessage(msgType, data); err != nil {
 				h.logger.Warn().
