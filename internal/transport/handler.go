@@ -552,6 +552,7 @@ func (h *Handler) ServeJSONRPC(ctx context.Context, conn IConn) error {
 
 // serveJSONRPC 在 goroutine 中运行 JSON-RPC 分发循环。
 func (h *Handler) serveJSONRPC(ctx context.Context, conn IConn) {
+	h.logger.Info().Str("device_id", conn.DeviceID()).Msg("serveJSONRPC entered")
 	for {
 		select {
 		case data, ok := <-conn.RecvCmd():
