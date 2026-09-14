@@ -389,7 +389,11 @@ func extractDeviceID(path string) string {
 //   - 0x03：视频帧（JPEG）→ videoCh
 //   - 其他：关闭连接
 func (h *Handler) readLoop(ws *wsConn) {
-	h.logger.Info().Str("device_id", ws.deviceID).Msg("readLoop entered")
+	h.logger.Info().
+		Str("device_id", ws.deviceID).
+		Dur("pong_wait", h.cfg.PongWait).
+		Int64("max_msg_size", h.cfg.MaxMessageSize).
+		Msg("readLoop entered")
 	defer ws.cancel() // 取消 context，通知所有 goroutine 退出
 
 	conn := ws.conn
