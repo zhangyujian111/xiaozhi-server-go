@@ -61,7 +61,9 @@ func NewOnHello(client *aisaas.Client, logger *slog.Logger) func(ctx context.Con
 		)
 
 		// 尝试拉取 Persona 列表（非阻塞，失败不阻断握手）
-		if client != nil {
+		// 注意：只有当前 aisaas client 已设置真实 API Key 时才调用，否则 aisaas 必定 401
+		// （/api/v1/personas 要求 Bearer API Key，不能用 InternalToken）
+		if client != nil && client.APIKey() != "" {
 			personas, err := client.ListPersonas(ctx, deviceID, 1)
 			if err != nil {
 				logger.WarnContext(ctx, "list personas failed, continuing without persona",
