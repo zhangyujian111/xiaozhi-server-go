@@ -702,6 +702,7 @@ default:
 }
 
 // sendError 发送 JSON-RPC 错误响应。
+func (h *Handler) sendError(conn IConn, id *int64, code int, message string, data interface{}) {
 	resp, err := NewErrorResponse(id, code, message, data)
 	if err != nil {
 		h.logger.Error().Err(err).Msg("failed to create error response")
@@ -1020,5 +1021,4 @@ func (h *Handler) unregisterVisionFlushHook(deviceID string) {
 	h.visionFlushHooksMu.Lock()
 	defer h.visionFlushHooksMu.Unlock()
 	delete(h.visionFlushHooks, deviceID)
-} 
- 
+}
